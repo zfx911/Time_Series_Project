@@ -1,0 +1,487 @@
+---
+title: "Exploratory Data Analysis"
+format: html
+editor: visual
+---
+
+In this part, a time series plot will be produced to analyze the components including the trends, seasonality, variation, periodic fluctuations. Then we will check for the lag plot to check for the randomness. After that decompose the time series to analyze for the components. ACF and PACF plots will be used to comment on the correlation and check about the stationary. If not stationary, detrend the data to make sure the stationarity. 
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(plotly)
+library(tseries)
+library(dplyr)
+library(lubridate)
+library(tseries)
+library(TSstudio)
+library(forecast) # package for autoplot
+library(gridExtra)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+weather=read.csv("./data/weather.csv")
+head(weather)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+NY=weather[weather$StateAbbreviation=="NY",]
+FL=weather[weather$StateAbbreviation=="FL",]
+CA=weather[weather$StateAbbreviation=="CA",]
+CAFLNY=weather[weather$StateAbbreviation %in% c("CA","FL","NY"),]
+head(CA)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+CA$date=as.Date(CA$Date,format="%Y-%m-%d")
+FL$date=as.Date(FL$Date,format="%Y-%m-%d")
+NY$date=as.Date(NY$Date,format="%Y-%m-%d")
+CAFLNY$date=as.Date(CAFLNY$Date,format="%Y-%m-%d")
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+start_date=as.Date("1990-01-01")
+CA90=filter(CA, date >= start_date)
+FL90=filter(FL, date >= start_date)
+NY90=filter(NY, date >= start_date)
+CAFLNY90=filter(CAFLNY, date >= start_date)
+```
+
+## Temperature
+
+### Time Series Plots
+
+Firstly, plot the time series plot of the average temperature for the selected state including California, Florida, and New York over time. 
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+#avtemp_month_all<-ts(CAFLNY90$AverageTemperature,star=as.Date("1990-01-01",format = "%Y-%m-%d"),frequency = 12)
+avtemp_month_CA<-ts(CA90$AverageTemperature,start=decimal_date(as.Date("1990-01-01",format = "%Y-%m-%d")),frequency = 12)
+avtemp_month_FL<-ts(FL90$AverageTemperature,start=decimal_date(as.Date("1990-01-01",format = "%Y-%m-%d")),frequency = 12)
+avtemp_month_NY<-ts(NY90$AverageTemperature,start=decimal_date(as.Date("1990-01-01",format = "%Y-%m-%d")),frequency = 12)
+```
+
+```{r,echo=FALSE}
+par(mfrow=c(3,1))
+#autoplot(avtemp_month_CA)+labs(x="Year",y="average temperature",title="average temperature in CA")
+#autoplot(avtemp_month_FL)+labs(x="Year",y="average temperature",title="average temperature in FL")
+#autoplot(avtemp_month_NY)+labs(x="Year",y="average temperature",title="average temperature in NY")
+plot(avtemp_month_CA,main="Average Temperature in CA",xlab="Year",ylab="Average Temperature")
+plot(avtemp_month_FL,main="Average Temperature in FL",xlab="Year",ylab="Average Temperature")
+plot(avtemp_month_NY,main="Average Temperature in NY",xlab="Year",ylab="Average Temperature")
+```
+
+In those figures, we can see the strong seasonality in each state overtime. It seems do not have any trend. The magnitude of variation of the seasonal component seems not change a lot, therefore this time series is more likely to use the additive rather than multiplicative. 
+
+### Lag Plots
+
+Then plot a lag plot to check whether the data set is random or not. Lag plot is a special type of scatter plot such that x-axis represent the dataset with some time units behind or ahead as compared to the Y-axis. Random data should not exhibit any identifiable structure in the lag plot, otherwise, the data should be non-random.
+
+We can see the lag plot of the average temperature for the selected states.
+
+::: {.panel-tabset}
+
+## California
+```{r,echo=FALSE}
+gglagplot(avtemp_month_CA, do.lines=FALSE) +xlab("Lags")+ylab("Y")+ggtitle("Lag Plot for the Average Temperature in CA")
+```
+
+## Florida
+```{r,echo=FALSE}
+gglagplot(avtemp_month_FL, do.lines=FALSE) +xlab("Lags")+ylab("Y")+ggtitle("Lag Plot for the Average Temperature in FL")
+```
+
+## New York
+```{r,echo=FALSE}
+gglagplot(avtemp_month_NY, do.lines=FALSE) +xlab("Lags")+ylab("Y")+ggtitle("Lag Plot for the Average Temperature in NY")
+```
+
+:::
+
+The lag plots show the strong seasonality of the average temperature in each states. In lag 12, we can see the strong positive correlation indicating the seasonality and the period of 12. In lag 6, we can see the strong negative correlation. It is because the lowest temperature match to the highest temperature (winter matches summer). This also makes sense.
+
+### Moving Average 
+Moving average smoothing will help us better understand the pattern(trend) of data. A moving average can be applied at different levels to bring out trends in the data. The figures below are the moving average of the average temperature in different state with MA equals to 4 month, 1 year, and 4 years.
+
+::: {.panel-tabset}
+
+## California
+```{r,warning=FALSE,echo=FALSE}
+autoplot(avtemp_month_CA, series="Data") +
+  autolayer(ma(avtemp_month_CA,4), series="4-month") +
+  autolayer(ma(avtemp_month_CA,12), series="1-year") +
+  autolayer(ma(avtemp_month_CA,48), series="4-years") +
+  xlab("Year") + ylab("average temperature") +
+  ggtitle("Moving Average of the Average Temperature in CA") +
+  scale_colour_manual(values=c("Data"="grey50","4-month"="darkgoldenrod1","1-year"="blueviolet","4-years"="red"),
+                      breaks=c("Data","4-month","1-year","4-years"))
+```
+
+## Florida
+```{r,warning=FALSE,echo=FALSE}
+autoplot(avtemp_month_FL, series="Data") +
+  autolayer(ma(avtemp_month_FL,4), series="4-month") +
+  autolayer(ma(avtemp_month_FL,12), series="1-year") +
+  autolayer(ma(avtemp_month_FL,48), series="4-years") +
+  xlab("Year") + ylab("average temperature") +
+  ggtitle("Moving Average of the Average Temperature in FL") +
+  scale_colour_manual(values=c("Data"="grey50","4-month"="darkgoldenrod1","1-year"="blueviolet","4-years"="red"),
+                      breaks=c("Data","4-month","1-year","4-years"))
+```
+
+## New York
+```{r,warning=FALSE,echo=FALSE}
+autoplot(avtemp_month_NY, series="Data") +
+  autolayer(ma(avtemp_month_NY,4), series="4-month") +
+  autolayer(ma(avtemp_month_NY,12), series="1-year") +
+  autolayer(ma(avtemp_month_NY,48), series="4-years") +
+  xlab("Year") + ylab("average temperature") +
+  ggtitle("Moving Average of the Average Temperature in NY") +
+  scale_colour_manual(values=c("Data"="grey50","4-month"="darkgoldenrod1","1-year"="blueviolet","4-years"="red"),
+                      breaks=c("Data","4-month","1-year","4-years"))
+```
+
+:::
+
+By checking the 4 years moving average, we can see that the average temperature is in a slightly increasing trend in Florida and California. In New York, the average temperature is almost maintain at the same level.
+
+### Decomposition 
+Decomposition can decompose the time series into trend, seasonality, and random (or remainder). It is more intuitive to check for the trend and seasonality. Also, we can use the random to detect anomalies and outliers.
+
+From the time series plot, we conclude that this time series of average temperature is additive in each state. Therefore decompose the time series using the method 'additive'.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+decompose_CA=decompose(avtemp_month_CA,'additive')
+decompose_FL=decompose(avtemp_month_FL,'additive')
+decompose_NY=decompose(avtemp_month_NY,'additive')
+```
+
+::: {.panel-tabset}
+
+## California
+```{r,echo=FALSE}
+autoplot(decompose_CA,ylab='average temp')+ggtitle("Average Temp from 1990 to 2021 in CA")
+```
+
+## Florida
+```{r,echo=FALSE}
+autoplot(decompose_FL,ylab='average temp')+ggtitle("Average Temp from 1990 to 2021 in FL")
+```
+
+## New York
+```{r,echo=FALSE}
+autoplot(decompose_NY,ylab='average temp')+ggtitle("Average Temp from 1990 to 2021 in NY")
+```
+ 
+:::
+
+By checking the decomposed time series, we can see the strong seasonality in each state. There is no clear trend in each state. But after 1995, we can see a slightly increasing trend overtime.
+
+### ACF & PACF
+
+ACF and PACF is used to determine whether the time series is stationary or not. The ACF plot is the correlation between a time series and its lag. The PACF plot is the partial correlation and its lag. Take California as an example to determine the correlation.
+
+::: {.panel-tabset}
+## ACF
+```{r,echo=FALSE}
+ggAcf(avtemp_month_CA)+ggtitle("ACF for Ave Temp in CA")
+```
+## PACF
+```{r,echo=FALSE}
+ggPacf(avtemp_month_CA)+ggtitle("PACF for Ave Temp in CA")
+```
+
+:::
+
+From the ACF graph, we can see the seasonality. A stationary series is a time series with a constant mean and variance and no seasonality. Therefore the time series is non-stationary.
+
+However, by checking the Augmented Dickey-Fuller Test,
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+tseries::adf.test(avtemp_month_CA)
+```
+
+we can see that the p=value is less than 0.05, which means reject the null hypothesis. The ADF test suggests that the time series is stationary which contradicts to the result of ACF plot. This somehow makes sense since the ADF test is for unit root, and Unit root test has low power. i.e. Sometimes ADF test not able to distinguish between values near to 1, thus giving contradict result.
+
+### Detrend
+
+Since the time series is non-stationary, we need to detrend to make it stationary.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+fit_CA= lm(avtemp_month_CA~time(avtemp_month_CA), na.action=NULL)
+summary(fit_CA)
+```
+
+```{r,echo=FALSE}
+# library(gridExtra)
+plot1<-autoplot(resid(fit_CA), main="Detrended") 
+plot2<-autoplot(diff(avtemp_month_CA), main="First Difference") 
+
+grid.arrange(plot1, plot2,nrow=2)
+```
+
+Check for the ACF plot.
+
+```{r,echo=FALSE}
+#require(gridExtra)
+fit_CA= lm(avtemp_month_CA~time(avtemp_month_CA), na.action=NULL)
+plot1<-ggAcf(avtemp_month_CA)+ggtitle("ACF for Ave Temp in CA")
+plot2<-ggAcf(diff(avtemp_month_CA, differences = 1))+ggtitle("First Difference") 
+plot3<-ggAcf(diff(avtemp_month_CA, differences = 2))+ggtitle("Second Difference") 
+plot4<-ggAcf(diff(avtemp_month_CA, differences = 3))+ggtitle("Third Difference") 
+
+grid.arrange(plot1, plot2,plot3, plot4,nrow=2)
+```
+
+After the third difference, we can see that the ACF plots becomes stationary, since it looks like an exponential decay.
+
+## Drought
+
+### Time Series Plot
+
+The time series plot will be used to plot the drought index in each state over time 
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+dr_month_CA<-ts(CA90$DroughtIndex,start=decimal_date(as.Date("1990-01-01",format = "%Y-%m-%d")),frequency = 12)
+dr_month_FL<-ts(FL90$DroughtIndex,start=decimal_date(as.Date("1990-01-01",format = "%Y-%m-%d")),frequency = 12)
+dr_month_NY<-ts(NY90$DroughtIndex,start=decimal_date(as.Date("1990-01-01",format = "%Y-%m-%d")),frequency = 12)
+```
+
+```{r,echo=FALSE}
+par(mfrow=c(3,1))
+plot(dr_month_CA,main="Drought Index in CA",xlab="Year",ylab="Drought index")
+plot(dr_month_FL,main="Drought Index in FL",xlab="Year",ylab="Drought index")
+plot(dr_month_NY,main="Drought Index in NY",xlab="Year",ylab="Drought index")
+```
+
+Firstly, in each state, we cannot see a clear trend overtime. Also the seasonality is not obvious. Therefore the drought index seems to be stationary. Then this time series appears more additive rather than multiplicative since there is no exponential increase in amplitudes over time.
+
+In the later section of the drought dataset, I will use New York as an example to do the analysis.
+
+### Lag Plot
+
+Lag plot is used to check for whether the data set is random. Lag plot is a special type of scatter plot such that x-axis represent the dataset with some time units behind or ahead as compared to the Y-axis. The Lag plot below shows the autocorrelation about the drought index in New York. 
+
+```{r,echo=FALSE}
+gglagplot(dr_month_NY, do.lines=FALSE) +xlab("Lags")+ylab("Y")+ggtitle("Lag Plot for Drought Index in NY")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+The lag plot shows weak correlation in Lag 1 and 2, but after Lag 4, the plots seem to have no correlation between them. Therefore, the time series is lack of seasonality over time.
+
+### Moving Average smoothing
+Moving average smoothing will help us better understand the pattern(trend) of data. A moving average can be applied at different levels to bring out trends in the data. The figure below shows the moving average of the doughts in New York in different level. 
+
+```{r,warning=FALSE,echo=FALSE}
+autoplot(dr_month_NY, series="Data") +
+  autolayer(ma(dr_month_NY,4), series="4-month") +
+  autolayer(ma(dr_month_NY,12), series="1-year") +
+  autolayer(ma(dr_month_NY,48), series="4-years") +
+  xlab("Year") + ylab("Drought index") +
+  ggtitle("Moving Average of Droughts in NY") +
+  scale_colour_manual(values=c("Data"="grey50","4-month"="darkgoldenrod1","1-year"="blueviolet","4-years"="red"),
+                      breaks=c("Data","4-month","1-year","4-years"))
+```
+
+According to the 4 year moving average, there is an increasing trend from 2000 to 2005, and then decreasing from 2005 to 2015, and then increasing again until 2020.
+
+### Decomposition
+Decomposition can decompose the time series into trend, seasonality, and random (or remainder). It is more intuitive to check for the trend and seasonality. Also, we can use the random to detect anomalies and outliers.
+
+From the time series plot, we conclude that this time series of Drought index in New York is additive.  Therefore decompose the time series using the method ‘additive’.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+decompose_CA=decompose(dr_month_CA,'additive')
+decompose_FL=decompose(dr_month_FL,'additive')
+decompose_NY=decompose(dr_month_NY,'additive')
+```
+
+```{r,echo=FALSE}
+autoplot(decompose_NY,ylab='Drought index')+ggtitle("Drought Index from 1990 to 2021 in NY")
+```
+
+After decomposing, we can see that the trend is totally random. However, it has some seasonality. It is the thinf that I do not capture from the time series plot.
+
+### ACF & PACF
+
+ACF and PACF is used to determine whether the time series is stationary or not. The ACF plot is the correlation between a time series and its lag. The PACF plot is the partial correlation and its lag. The graphs belows are the ACF and PACF of the drought in New York.
+
+::: {.panel-tabset}
+
+## ACF
+```{r,echo=FALSE}
+ggAcf(dr_month_NY)+ggtitle("ACF for Drought Index in NY")
+```
+
+## PACF
+```{r,echo=FALSE}
+ggPacf(dr_month_NY)+ggtitle("PACF for Drought Index in NY")
+```
+
+:::
+
+Since there is a slow decay in ACF plot, the future value is correlated with past values. In the ACF curve, the dashed blue lines indicate whether the correlations are significantly different from zero. When the correlation is high, it will be not stationary. We can see that lots of bars are outside the range of the dot blue line, which means the series is not stationary.
+
+However, by checking the Augmented Dickey-Fuller Test,
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+tseries::adf.test(dr_month_NY)
+```
+
+we can see that the p=value is less than 0.05, which means reject the null hypothesis. The ADF test suggests that the time series is stationary which contradicts to the result of ACF plot. This somehow makes sense since the ADF test is for unit root, and Unit root test has low power. i.e. Sometimes ADF test not able to distinguish between values near to 1, thus giving contradict result.
+
+### Detrend
+
+Since the time series is not stationary, we need to detrend to make it stationary.
+
+```{r,echo=FALSE}
+fit_NY= lm(dr_month_NY~time(dr_month_NY), na.action=NULL)
+
+plot1<-autoplot(resid(fit_NY), main="Detrended") 
+plot2<-autoplot(diff(dr_month_NY), main="First Difference") 
+
+grid.arrange(plot1, plot2,nrow=2)
+```
+
+Check for the ACF plot.
+
+```{r,echo=FALSE}
+
+plot1<-ggAcf(dr_month_NY)+ggtitle("ACF for Drought Index in NY")
+plot2<-ggAcf(diff(dr_month_NY, differences = 1))+ggtitle("First Difference") 
+plot3<-ggAcf(diff(dr_month_NY, differences = 2))+ggtitle("Second Difference") 
+
+grid.arrange(plot1, plot2,plot3,nrow=2)
+```
+
+After the first difference, we can see that the ACF plots becomes relatively stationary. After the second difference, we can see that the ACF plots becomes stationary.
+
+## Flood
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+flood=read.csv("./data/flood.csv")
+head(flood)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+fNY=flood[flood$StateAbbreviation=="NY",]
+fFL=flood[flood$StateAbbreviation=="FL",]
+fCA=flood[flood$StateAbbreviation=="CA",]
+fCAFLNY=flood[flood$StateAbbreviation %in% c("CA","FL","NY"),]
+head(fCA)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+fCA$date=as.Date(fCA$Date,format="%Y-%m-%d")
+fFL$date=as.Date(fFL$Date,format="%Y-%m-%d")
+fNY$date=as.Date(fNY$Date,format="%Y-%m-%d")
+fCAFLNY$date=as.Date(fCAFLNY$Date,format="%Y-%m-%d")
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+f_month_CA<-ts(fCA$NumberOfFloods,start=decimal_date(as.Date("2006-01-01",format = "%Y-%m-%d")),frequency = 12)
+f_month_FL<-ts(fFL$NumberOfFloods,start=decimal_date(as.Date("2006-01-01",format = "%Y-%m-%d")),frequency = 12)
+f_month_NY<-ts(fNY$NumberOfFloods,start=decimal_date(as.Date("2006-01-01",format = "%Y-%m-%d")),frequency = 12)
+```
+
+### Time Series Plot
+
+Plot the time series of the number of Flood in each state over time.
+
+```{r,echo=FALSE}
+par(mfrow=c(3,1))
+plot(f_month_CA,main="Number of Floods in CA",xlab="Year",ylab="Number of Flood")
+plot(f_month_FL,main="Number of Floods in FL",xlab="Year",ylab="Number of Flood")
+plot(f_month_NY,main="Number of Floods in NY",xlab="Year",ylab="Number of Flood")
+```
+
+Firstly, we cannot see a clear trend overtime in each time. The trend of the number of flood in California might in an slightly increasing trend, but only for the maximum point of the flood in each year. Also the seasonality is no obvious in each state. Generally speaking, the number of flood seems to be stationary. 
+
+I choose the Florida as an example to do the analysis later. This time series appears more additive rather than multiplicative since there is no exponential increase in amplitudes over time.
+
+### Lag plot 
+
+Lag plot is used to check for whether the data set is random. Lag plot is a special type of scatter plot such that x-axis represent the dataset with some time units behind or ahead as compared to the Y-axis. The Lag plot below shows the autocorrelation about the number of Flood in Florida.
+
+```{r,echo=FALSE}
+gglagplot(f_month_FL, do.lines=FALSE) +xlab("Lags")+ylab("Y")+ggtitle("Lag Plot for FL")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+The series shows no seasonality since there is no correlation in all the lags.
+
+### Moving Average smoothing
+Moving average smoothing will help us better understand the pattern(trend) of data. A moving average can be applied at different levels to bring out trends in the data. The figure below shows the moving average of the Flood in Florida in different level. 
+
+```{r,warning=FALSE,echo=FALSE}
+autoplot(f_month_FL, series="Data") +
+  autolayer(ma(f_month_FL,4), series="4-month") +
+  autolayer(ma(f_month_FL,12), series="1-year") +
+  autolayer(ma(f_month_FL,48), series="4-years") +
+  xlab("Year") + ylab("Number of Floods") +
+  ggtitle("Moving Average of Floods in FL") +
+  scale_colour_manual(values=c("Data"="grey50","4-month"="darkgoldenrod1","1-year"="blueviolet","4-years"="red"),
+                      breaks=c("Data","4-month","1-year","4-years"))
+```
+
+According to the 4 years moving average, there is an increasing trend of the number of floods until 2016, and then change into a slightly decreasing trend until 2020.
+
+### Decomposition
+
+Decomposition can decompose the time series into trend, seasonality, and random (or remainder). It is more intuitive to check for the trend and seasonality. Also, we can use the random to detect anomalies and outliers.
+
+From the time series plot, we conclude that this time series of Flood in Florida is additive. Therefore decompose the time series using the method ‘additive’.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+decompose_CA=decompose(f_month_CA,'additive')
+decompose_FL=decompose(f_month_FL,'additive')
+decompose_NY=decompose(f_month_NY,'additive')
+```
+
+```{r,echo=FALSE}
+autoplot(decompose_FL,ylab='average temp')+ggtitle("Number of Floods from 1990 to 2021 in FL")
+```
+
+After decomposing, we can see that the trend is random.
+
+### ACF & PACF
+
+ACF and PACF is used to determine whether the time series is stationary or not. The ACF plot is the correlation between a time series and its lag. The PACF plot is the partial correlation and its lag. The graphs belows are the ACF and PACF of the number of flood in Florida.
+
+::: {.panel-tabset}
+
+## ACF
+```{r,echo=FALSE}
+ggAcf(f_month_FL)+ggtitle("ACF for Number of Floods in FL")
+```
+
+## PACF
+```{r,echo=FALSE}
+ggPacf(f_month_FL)+ggtitle("PACF for Number of Floods in FL")
+```
+
+:::
+
+From the PACF plot, we can see the significant correlations at the first lag followed by correlations that mostly are not significant. Therefore the time series seems to be stationary, but not very strong.
+
+Then check the Augmented Dickey-Fuller Test,
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+tseries::adf.test(f_month_FL)
+```
+
+we can see that the p=value is less than 0.05, which means reject the null hypothesis. Therefore, the ADF test suggests that the time series is stationary. This confirm the result above.
+
+### Detrend 
+
+Check the ACF plot for stationary. 
+
+```{r,echo=FALSE}
+plot1<-ggAcf(f_month_FL)+ggtitle("ACF for Number of Floods in FL")
+plot2<-ggAcf(diff(f_month_FL, differences = 1))+ggtitle("First Difference") 
+#plot3<-ggAcf(diff(f_month_FL, differences = 2))+ggtitle("second difference") 
+#plot4<-ggAcf(diff(f_month_FL, differences = 3))+ggtitle("third difference") 
+
+#grid.arrange(plot1, plot2,plot3, plot4,nrow=2)
+grid.arrange(plot1, plot2,nrow=2)
+```
+
+The original plot is almost stationary. The first difference may be useless (avoid over-difference).
+

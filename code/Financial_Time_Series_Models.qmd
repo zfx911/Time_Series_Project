@@ -1,0 +1,304 @@
+---
+title: "Financial Time Series Models (ARCH/GARCH)"
+format: 
+    html:
+        embed-resources: true
+editor: visual
+---
+
+```{r ,echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(forecast)
+library(astsa) 
+library(xts)
+library(tseries)
+library(fpp2)
+library(fma)
+library(lubridate)
+library(tidyverse)
+library(TSstudio)
+library(quantmod)
+library(tidyquant)
+library(plotly)
+library(ggplot2)
+library(TSA)
+library(fGarch) 
+library(dynlm)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE,results='hide'}
+Sys.setlocale("LC_ALL", "English")
+```
+
+In this part, the ARCH/GARCH will be applied to analyze the adjusting stock price of ExxonMobil (XOM) which is an American multinational oil and gas corporation. The reason for choosing the stock price of oil and gas related company to analyze is that the emission is related to the climate change. The adjusted closing prices is be gathered from Yahoo Finance. The goal of this analysis is to analyze the stock price volatility and find out the best model. 
+
+### Plot the adjusted price for XOM
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE,results='hide'}
+getSymbols("XOM", from="1980-01-01", src="yahoo")
+XOM=data.frame(XOM)
+XOM <- data.frame(XOM,rownames(XOM))
+colnames(XOM)[7] = "date"
+XOM$date<-as.Date(XOM$date,"%Y-%m-%d")
+head(XOM)
+```
+
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+p<-XOM %>%
+  ggplot()+
+  geom_line(aes(y=XOM.Adjusted,x=date),color="blue")
+
+ggplotly(p)
+```
+
+We can see that the stock price is generally in an increasing trend. From 2007-07 to 2010-07 and 2019-11 to 2020-10, there is a decreasing trend in those two period, but for the other period, the trend is increasing for most of time. The stock price reaches the highest at 2023-04
+
+### Candlestick plot
+
+::: {.panel-tabset}
+## Figure 1
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+fig <- XOM %>% plot_ly(x = ~date, type="candlestick",
+          open = ~XOM.Open, close = ~XOM.Close,
+          high = ~XOM.High, low = ~XOM.Low) 
+
+fig <- fig %>% layout(title = "Basic Candlestick Chart")
+
+fig
+```
+
+
+## Figure 2
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+XOM_use=getSymbols("XOM",auto.assign = FALSE, from="1980-01-01", src="yahoo")
+chartSeries(XOM_use, theme = chartTheme("white"), # Theme
+            bar.type = "hlc",  # High low close 
+            up.col = "green",  # Up candle color
+            dn.col = "red",    # Down candle color
+            name="XOM price")   
+
+```
+
+
+## Figure 3
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+XOM_use.adj<- Ad(XOM_use)
+returns = diff(log(XOM_use.adj))
+chartSeries(returns, theme="white",name = "Returns")
+```
+
+:::
+
+The first figure shows the spikes of volatility in the price, especially around certain points where the price dramatically drops and rises. This is a good first indicator that there will be an ARCH/GARCH component when fitting the data. 
+
+The second figure shows the price versus volume of XOM stock. This gives us some more information in different perspective, but the overall conclusion is the same.
+
+The third figure shows the volatility of the returns of the ExxonMobil Corporation. The return is the difference of the log of the adjusting price. Here, we can see that there exists clusters of high volatility in the model. Therefore, GARCH models are leveraged in order to better understand this volatility.
+
+### ACF and PACF plots
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE,results='hide'}
+price.close=ts(Ad(XOM_use))
+ggAcf(log(price.close)) +ggtitle("ACF of Log Transformed ExxonMobil Stock Prices")
+```
+
+Check for the ACF and PACF plot of the returns (difference of log of adjusted price). Also check for the ACF plot of the absolute values and the squared values of the returns.
+
+::: {.panel-tabset}
+## Returns
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+XOM_use=getSymbols("XOM",auto.assign = FALSE, from="1980-01-01", src="yahoo")
+XOM_re=ts(Ad(XOM_use))
+returns = log(XOM_re) %>% diff()
+par(mfrow= c(1,2))
+acf(returns)
+pacf(returns)
+```
+
+
+## Abs & Sq
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+par(mfrow= c(1,2))
+acf(abs(returns))
+acf(returns^2)
+```
+
+:::
+
+The ACF plot and PACF plot of the returns shows that the series is almost stationary. We can use d=0,1 on returns to the ARIMA model. The ACF plot suggests that q=1,2, PACF plot suggests that p=0,1,2,3,4. In addtion, the absolute values and the squared values plot shows a clear correlation.
+
+
+
+### Model Fitting 
+
+#### ARIMA model
+Fit the ARIMA model at first with q=0,1,2 d=0,1, and p=0,1,2,3,4. 
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+ARIMA.c=function(p1,p2,q1,q2,data){
+temp=c()
+d=1
+i=1
+temp= data.frame()
+ls=matrix(rep(NA,6*29),nrow=29)
+
+
+for (p in p1:p2)#
+{
+  for(q in q1:q2)#
+  {
+    for(d in 0:1)#
+    {
+      
+      if(p+d+q<=6)
+      {
+        
+        model<- Arima(data,order=c(p,d,q))
+        ls[i,]= c(p,d,q,model$aic,model$bic,model$aicc)
+        i=i+1
+  
+        
+      }
+      
+    }
+  }
+}
+
+
+temp= as.data.frame(ls)
+names(temp)= c("p","d","q","AIC","BIC","AICc")
+
+temp
+}
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+output <- ARIMA.c(0,4,0,2,data=returns)
+knitr::kable(output)
+```
+
+Then select the best model based on the minimum AIC, BIC, and AICc.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+# AIC
+df1=output[which.min(output$AIC),]
+Method="Minimum AIC:"
+df1=cbind(df1, Method)
+df1=df1[,c("Method",names(df1)[names(df1) != "Method"])]
+
+# BIC
+df2=output[which.min(output$BIC),]
+Method="Minimum BIC:"
+df2=cbind(df2, Method)
+df2=df2[,c("Method",names(df2)[names(df2) != "Method"])]
+
+# AICc
+df3=output[which.min(output$AICc),]
+Method="Minimum AICc:"
+df3=cbind(df3, Method)
+df3=df3[,c("Method",names(df3)[names(df3) != "Method"])]
+
+#put all data frames into list
+df_list <- list(df1, df2, df3)      
+
+#merge all data frames together
+df_use=Reduce(function(x, y) merge(x, y, all=TRUE), df_list)  
+knitr::kable(df_use)
+```
+
+The minimum AIC and AICc suggests that p=1,d=0,q=2, and minimum BIC suggests that p=1,d=0,q=1. We will do the model diagnostics and check the performance later to find the better model among those two.
+
+#### Model Diagnostics
+
+::: {.panel-tabset}
+## ARIMA(1,0,2)
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+model_output <- capture.output(sarima(returns, 1,0,2))
+cat(model_output[27:58], model_output[length(model_output)], sep = "\n")
+```
+
+## ARIMA(1,0,1)
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+model_output <- capture.output(sarima(returns, 1,0,1))
+cat(model_output[29:60], model_output[length(model_output)], sep = "\n")
+```
+
+:::
+
+The general performance of both model are good. Since the AIC of p=1,d=0,q=1 has the lowest AIC, we will fit the GARCH model use the residual of the ARIMA(1,0,1)
+
+#### Fit the GARCH model
+
+Use the residuals of of returns of the ARIMA(1,0,1) to fit a GARCH model.
+
+First, Check for the ACF and PACF plot.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+arima.fit<-Arima(returns,order=c(1,0,1),include.drift = TRUE)
+arima.res<-arima.fit$residuals
+
+par(mfrow= c(1,2))
+acf(arima.res^2)
+pacf(arima.res^2)
+```
+
+Fit the garvh model with p and q from 1 to 5. The best model is the model with lowest AIC.
+```{r, message=FALSE, warning=FALSE}
+model <- list() ## set counter
+cc <- 1
+for (p in 1:5) {
+  for (q in 1:5) {
+  
+model[[cc]] <- garch(arima.res,order=c(q,p),trace=F)
+cc <- cc + 1
+}
+} 
+
+## get AIC values for model evaluation
+GARCH_AIC <- sapply(model, AIC) ## model with lowest AIC is the best
+#which(GARCH_AIC == min(GARCH_AIC))
+model[[which(GARCH_AIC == min(GARCH_AIC))]]
+```
+
+<br>
+
+Above all, the most optimal model for return is the ARIMA(1,0,1) + GARCH(1,2). 
+
+Finally summary the model to write the equation. Check ARIMA(1,0,1) and garch(1,2) with the residuals of arima model repectively.
+
+::: {.panel-tabset}
+## ARIMA(1,0,1)
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+summary(arima.fit<-Arima(returns,order=c(1,0,1),include.drift = TRUE))
+```
+
+## garch(1,2)
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+summary(final.fit <-garchFit(~garch(1,2), arima.res,trace = F)) 
+```
+
+:::
+
+After fitting the optimal model, it was determined that the p-values associated with each coefficient was less than 0.05. And the Ljung-Box Test suggests that they exhibit serial correlation. As such, all of the coefficients were included in the model equation displayed are on the right.
+
+The final equation:
+
+$(1-0.5754B)x_{t}=(1-0.6603B)y_{t}+8*10^{-4}$ or $x_{t}=0.5754x_{t-1}+y_{t}-0.6603y_{t-1}+8*10^{-4}$
+
+$y_t=\sigma_t \epsilon_t$
+
+$var(y_t|y_{t-1})=\sigma_t^{2} = 4.212*10^{-6}+0.09896y_{t-1}+0.5151\epsilon_{t-1}+0.3682\epsilon_{t-2}$
+
+
+
+### Volatility plot
+```{r, message=FALSE, warning=FALSE}
+ht <- final.fit@h.t #a numeric vector with the conditional variances (h.t = sigma.t^delta)
+data= data.frame(ht,XOM$date[-1])
+a=ggplot(data, aes(y = ht, x = XOM.date..1.)) + geom_line(col = '#ff9933') + ylab('Conditional Variance') + xlab('Date')+ggtitle("Volatility plot")
+ggplotly(a)
+```
+
+There are obvious high volatility in 1987, 2008, and 2020. In 2008, the high volatility of stock price may caused by Hurricane Ike struck, which is a natural disaster. 
+

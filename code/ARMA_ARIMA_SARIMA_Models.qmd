@@ -1,0 +1,1154 @@
+---
+title: "ARMA/ARIMA/SARIMA Models"
+format: html
+editor: visual
+---
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(plotly)
+library(tseries)
+library(dplyr)
+library(lubridate)
+library(tseries)
+library(TSstudio)
+library(forecast) # package for autoplot
+library(gridExtra)
+library(astsa)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+weather=read.csv("./data/weather.csv")
+head(weather)
+```
+
+## Average Temperature
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+temperature.ts.ca <- weather %>%
+  filter(StateAbbreviation == "CA") %>%
+  select(AverageTemperature) %>%
+  ts(
+    start = c(1895, 1),
+    end = c(2021, 12),
+    frequency = 12
+  )%>%
+  window(start=c(1980,1))
+```
+
+The ARIMA and SARIMA model will be applied to better analyze the average temperature in California and forecast the future average temperature based on the historical data. Before applying the model, we need to make sure that the time series is stationary. According to the EDA part, the time series is non-stationary, therefore we need to difference to make it stationary.
+
+### Check for stationary (by ACF plot)
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+ggAcf(temperature.ts.ca)+ggtitle("ACF for Ave Temp in CA")
+```
+
+From the ACF plot, we can see the strong seasonality, and there are lots of lags out of the significant range. Therefore the data is not stationary. We need to difference the time series data later. 
+
+### Difference data 
+
+The figures below are the ACF plot for original data and multiple order of differencing.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+plot1<-ggAcf(temperature.ts.ca)+ggtitle("ACF for Ave Temp in CA")
+plot2<-ggAcf(diff(temperature.ts.ca, differences = 1))+ggtitle("first difference") 
+plot3<-ggAcf(diff(temperature.ts.ca, differences = 2))+ggtitle("second difference") 
+plot4<-ggAcf(diff(temperature.ts.ca, differences = 3))+ggtitle("third difference") 
+
+grid.arrange(plot1, plot2,plot3, plot4,nrow=2)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+tseries::adf.test(temperature.ts.ca %>% diff() %>% diff() %>% diff())
+```
+
+By checking the ACF plot and ADF test, it seems like the third difference looks more stationary. However, the third order difference may over difference the model. Therefore we need consider d=1,2,3 in the model selection later.
+
+### ARIMA model
+
+Firstly, obtain q and p according to the ACF and PACF plot
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+temperature.ts.ca %>% diff() %>% diff() %>% diff() %>% ggtsdisplay()
+```
+
+The ACF plot suggests that q=1,2 and PACF plot suggests that p=1,2,3. Then apply the Arima model and check for the AIC, BIC and AICC.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+d=1
+i=1
+temp= data.frame()
+ls=matrix(rep(NA,6*18),nrow=18) 
+
+
+for (p in 2:4)# p=1,2,3 
+{
+  for(q in 2:3)# q=1,2
+  {
+    for(d in 1:3)# d=1,2,3
+    {
+      
+      if(p-1+d+q-1<=8)
+      {
+        
+        model<- Arima(temperature.ts.ca,order=c(p-1,d,q-1),include.drift=TRUE) 
+        ls[i,]= c(p-1,d,q-1,model$aic,model$bic,model$aicc)
+        i=i+1
+        #print(i)
+        
+      }
+      
+    }
+  }
+}
+
+temp= as.data.frame(ls)
+names(temp)= c("p","d","q","AIC","BIC","AICc")
+
+#temp
+knitr::kable(temp)
+```
+
+Then do the model selection based on the minimum AIC, BIC, and AICc.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+# AIC
+df1=temp[which.min(temp$AIC),]
+Method="Minimum AIC:"
+df1=cbind(df1, Method)
+df1=df1[,c("Method",names(df1)[names(df1) != "Method"])]
+
+# BIC
+df2=temp[which.min(temp$BIC),]
+Method="Minimum BIC:"
+df2=cbind(df2, Method)
+df2=df2[,c("Method",names(df2)[names(df2) != "Method"])]
+
+# AICc
+df3=temp[which.min(temp$AICc),]
+Method="Minimum AICc:"
+df3=cbind(df3, Method)
+df3=df3[,c("Method",names(df3)[names(df3) != "Method"])]
+
+#put all data frames into list
+df_list <- list(df1, df2, df3)      
+
+#merge all data frames together
+df_use=Reduce(function(x, y) merge(x, y, all=TRUE), df_list)  
+knitr::kable(df_use)
+```
+
+
+By checking the AIC and BIC and AICc, the best model is p=3,d=1,q=2.
+
+### SARIMA model
+Difference the data using both seasonal differencing and ordinary differencing, and then plot the ACF graph.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+temperature.ts.ca %>% diff(lag=12) %>% diff() %>% ggtsdisplay()
+```
+
+By the ACF plot, we will use q=0,1, Q=0,1. By the PACF plot, we will use q=0,1,2,3,4, and Q=0,1,2. Then apply the Sarima model and check for the AIC, BIC and AICC.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+SARIMA.c=function(p1,p2,q1,q2,P1,P2,Q1,Q2,data){
+  
+  temp=c()
+  d=1
+  D=1
+  s=12
+  
+  i=1
+  temp= data.frame()
+  ls=matrix(rep(NA,9*60),nrow=60)
+  
+  
+  for (p in p1:p2)
+  {
+    for(q in q1:q2)
+    {
+      for(P in P1:P2)
+      {
+        for(Q in Q1:Q2)
+        {
+          try(if(p+d+q+P+D+Q<=10)
+          {
+            
+            model<- Arima(data,order=c(p,d,q),seasonal=c(P,D,Q))
+            ls[i,]= c(p,d,q,P,D,Q,model$aic,model$bic,model$aicc)
+            i=i+1
+            #print(i)
+            
+          },silent = TRUE)
+          
+        }
+      }
+    }
+    
+  }
+  
+  
+  temp= as.data.frame(ls)
+  names(temp)= c("p","d","q","P","D","Q","AIC","BIC","AICc")
+  
+  temp
+  
+}
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+output=SARIMA.c(p1=0,p2=4,q1=0,q2=1,P1=0,P2=1,Q1=0,Q2=2,data=temperature.ts.ca)
+knitr::kable(output)
+```
+
+Then do the model selection based on the minimum AIC, BIC, and AICc.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+# AIC
+df1=output[which.min(output$AIC),]
+Method="Minimum AIC:"
+df1=cbind(df1, Method)
+df1=df1[,c("Method",names(df1)[names(df1) != "Method"])]
+
+# BIC
+df2=output[which.min(output$BIC),]
+Method="Minimum BIC:"
+df2=cbind(df2, Method)
+df2=df2[,c("Method",names(df2)[names(df2) != "Method"])]
+
+# AICc
+df3=output[which.min(output$AICc),]
+Method="Minimum AICc:"
+df3=cbind(df3, Method)
+df3=df3[,c("Method",names(df3)[names(df3) != "Method"])]
+
+#put all data frames into list
+df_list <- list(df1, df2, df3)      
+
+#merge all data frames together
+df_use=Reduce(function(x, y) merge(x, y, all=TRUE), df_list)  
+knitr::kable(df_use)
+```
+
+
+By checking the AIC and BIC and AICc, the best model is p=1,d=1,q=1, P=0, D=1, Q=1.
+
+
+### Model Diagnostics
+
+
+::: {.panel-tabset}
+## ARIMA selected model
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+model_output <- capture.output(sarima(temperature.ts.ca,3,1,2))
+cat(model_output[78:110], model_output[length(model_output)], sep = "\n")
+```
+
+
+## SARIMA selected model
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+model_output <- capture.output(sarima(temperature.ts.ca,1,1,1,0,1,1,12))
+cat(model_output[35:64], model_output[length(model_output)], sep = "\n")
+```
+
+:::
+
+By model diagnostics, we can see that the coefficients are significant in both ARIMA and SARIMA model. However, the ACF plot of ARIMA model looks not that significant. It may due to the strong seasonality. The sarima model works better, since it consider more about the seasonality compare to the arima model. The ACF of SARIMA shows that there is no lag out of the significant range, which means the model is in a good fit.
+
+### Using auto.arima()
+Then check for the result of the auto arima model.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+auto.arima(temperature.ts.ca)
+```
+
+The result of using auto.arima is the same as using the sarima model, which means the sarima model that I chose is in a good fit.
+
+### Forecasting
+Forecast the future temperature with the best ARIMA and SARIMA model. The best ARIMA model is ARIMA(3,1,2), and the best SARIMA model is SARIMA(1,1,1)(0,1,1)[12].
+
+#### Arima model
+
+::: {.panel-tabset}
+
+## ARIMA 1
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+sarima.for(temperature.ts.ca,36, 3,1,2)
+```
+
+
+## ARIMA 2
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+temperature.ts.ca %>%
+  Arima(order=c(3,1,2),include.drift = TRUE) %>%
+  forecast() %>%
+  autoplot() +
+  ylab("average temperature") + xlab("Year")
+```
+
+:::
+
+The two figures above show the forecast of the average temperature in the future using the arima model. The forecast also account for the seasonal variance in the data.
+
+#### Sarima model
+
+::: {.panel-tabset}
+
+## SARIMA 1
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+sarima.for(temperature.ts.ca,36, 1,1,1,0,1,1,12)
+```
+
+
+## SARIMA 2
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+fit <- Arima(temperature.ts.ca, order=c(1,1,1), seasonal=c(0,1,1))
+fit %>% forecast() %>% autoplot() +
+  ylab("average temperature") + xlab("Year")
+```
+
+:::
+
+The two figures above show the forecast of the average temperature in the future using the sarima model. We can see that the margin of error is less than using the arima model, which means predict the trend using sarima model has more confidence.
+
+### Compare with benchmark methods
+
+Plot the forecasts at first.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+fit1 <- Arima(temperature.ts.ca, order=c(3,1,2),include.drift=TRUE)
+fit2 <- Arima(temperature.ts.ca, order=c(1,1,1), seasonal=c(0,1,1))
+
+autoplot(temperature.ts.ca) +
+  autolayer(meanf(temperature.ts.ca, h=30),
+            series="Mean", PI=FALSE) +
+  autolayer(naive(temperature.ts.ca, h=30),
+            series="Naïve", PI=FALSE) +
+  autolayer(snaive(temperature.ts.ca, h=30),
+            series="SNaïve", PI=FALSE)+
+  autolayer(rwf(temperature.ts.ca, h=30, drift=TRUE),
+            series="Drift", PI=FALSE)+
+  autolayer(forecast(fit1,30), 
+            series="arima",PI=FALSE) +
+  autolayer(forecast(fit2,30), 
+            series="sarima",PI=FALSE) +
+  guides(colour=guide_legend(title="Forecast"))
+```
+
+By checking the graph, my fitted models and the snaive benchmark method seem have a good fit to predict the time series. Therefore, check the accuracy of forecasting by using those methods.
+
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+f2 <- snaive(temperature.ts.ca, h=30) 
+B1=accuracy(f2)
+B1=as.data.frame(B1)
+Model="Snaive Benchmark Method"
+B1=cbind(B1, Model)
+B1=B1[,c("Model",names(B1)[names(B1) != "Model"])]
+
+B2=accuracy(forecast(fit1,30))
+B2=as.data.frame(B2)
+Model="Fitted Arima Model"
+B2=cbind(B2, Model)
+B2=B2[,c("Model",names(B2)[names(B2) != "Model"])]
+
+B3=accuracy(forecast(fit2,30))
+B3=as.data.frame(B3)
+Model="Fitted Sarima Model"
+B3=cbind(B3, Model)
+B3=B3[,c("Model",names(B3)[names(B3) != "Model"])]
+
+#put all data frames into list
+df_list <- list(B1, B2, B3)      
+
+#merge all data frames together
+df_use=Reduce(function(x, y) merge(x, y, all=TRUE), df_list)  
+knitr::kable(df_use)
+```
+
+
+By comparing the RMSE, the fitted model by using the sarima has the lowest RMSE. The RMSE of my fitted ARIMA model is slightly lower than using the benchmark method. Above all, the fitted model by using sarima has the best performance on predicting the average temperature. 
+
+
+
+
+
+## Predict Average temperature using drought index and the precipitation
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+temp.all.ca <- weather %>%
+  filter(StateAbbreviation == "CA") %>%
+  select(AverageTemperature,DroughtIndex,Precipitation) %>%
+  ts(
+    start = c(1895, 1),
+    end = c(2020, 12),
+    frequency = 12
+  )%>%
+  window(start=c(1980,1))
+```
+
+The ARIMA and SARIMA model will be applied to analyze the average temperature in California by considering the effect of the drought index and the precipitation, and then forecast the future average temperature. Before applying the model, we need to make sure that the time series is stationary by checking the ACF plot, and then do the differencing if it is not stationary.
+
+
+### Fit the data and check for the ACF plot
+
+Here we will first fit a linear regression model predicting average temperature using the drought index and the precipitation. Then use the residual to check for the ACF plot and do the differencing.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+fit.reg <- lm(AverageTemperature ~ DroughtIndex + Precipitation, data=temp.all.ca)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+plot1=ggAcf(residuals(fit.reg))
+plot2<-ggAcf(diff(residuals(fit.reg), differences = 1))+ggtitle("first difference") 
+plot3<-ggAcf(diff(residuals(fit.reg), differences = 2))+ggtitle("second difference") 
+
+grid.arrange(plot1, plot2,plot3,nrow=2)
+```
+
+Check for the ADF test
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+tseries::adf.test(residuals(fit.reg) %>% diff() %>% diff())
+```
+
+By checking the ACF plot and ADF test, it seems like the second difference looks stationary. Therefore we can consider d=0,1,2 in the model selection later.
+
+### ARIMA model
+
+Firstly, obtain q and p according to the ACF and PACF plot
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+residuals(fit.reg) %>% diff() %>% diff()  %>% ggtsdisplay()
+```
+
+The ACF plot suggests that q=1,2 and PACF plot suggests that p=1,2,3,4. Then apply the Arima model and check for the AIC, BIC and AICC.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+d=1
+i=1
+temp= data.frame()
+ls=matrix(rep(NA,6*24),nrow=24) 
+
+
+for (p in 2:5)# p=1,2,3,4
+{
+  for(q in 2:3)# q=1,2
+  {
+    for(d in 1:3)# d=1,2,3
+    {
+      
+      if(p-1+d+q-1<=8)
+      {
+        
+        model<- Arima(residuals(fit.reg),order=c(p-1,d,q-1),include.drift=TRUE) 
+        ls[i,]= c(p-1,d,q-1,model$aic,model$bic,model$aicc)
+        i=i+1
+        #print(i)
+        
+      }
+      
+    }
+  }
+}
+
+temp= as.data.frame(ls)
+names(temp)= c("p","d","q","AIC","BIC","AICc")
+
+#temp
+knitr::kable(temp)
+```
+
+Then do the model selection based on the minimum AIC, BIC, and AICc.
+
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+# AIC
+df1=temp[which.min(temp$AIC),]
+Method="Minimum AIC:"
+df1=cbind(df1, Method)
+df1=df1[,c("Method",names(df1)[names(df1) != "Method"])]
+
+# BIC
+df2=temp[which.min(temp$BIC),]
+Method="Minimum BIC:"
+df2=cbind(df2, Method)
+df2=df2[,c("Method",names(df2)[names(df2) != "Method"])]
+
+# AICc
+df3=temp[which.min(temp$AICc),]
+Method="Minimum AICc:"
+df3=cbind(df3, Method)
+df3=df3[,c("Method",names(df3)[names(df3) != "Method"])]
+
+#put all data frames into list
+df_list <- list(df1, df2, df3)      
+
+#merge all data frames together
+df_use=Reduce(function(x, y) merge(x, y, all=TRUE), df_list)  
+knitr::kable(df_use)
+```
+
+By checking the AIC and BIC and AICc, the best model is p=4,d=1,q=2.
+
+### SARIMA model
+Difference the data using both seasonal differencing and ordinary differencing, and then plot the ACF graph.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+residuals(fit.reg) %>% diff(12) %>% diff()  %>% ggtsdisplay()
+```
+
+By the ACF plot, we will use q=0,1, Q=0,1. By the PACF plot, we will use q=0,1,2,3,4, and Q=0,1,2. Then apply the Sarima model and check for the AIC, BIC and AICC.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+SARIMA.c=function(p1,p2,q1,q2,P1,P2,Q1,Q2,data){
+  
+  temp=c()
+  d=1
+  D=1
+  s=12
+  
+  i=1
+  temp= data.frame()
+  ls=matrix(rep(NA,9*60),nrow=60)
+  
+  
+  for (p in p1:p2)
+  {
+    for(q in q1:q2)
+    {
+      for(P in P1:P2)
+      {
+        for(Q in Q1:Q2)
+        {
+          try(if(p+d+q+P+D+Q<=10)
+          {
+            
+            model<- Arima(data,order=c(p,d,q),seasonal=c(P,D,Q))
+            ls[i,]= c(p,d,q,P,D,Q,model$aic,model$bic,model$aicc)
+            i=i+1
+            #print(i)
+            
+          },silent = TRUE)
+          
+        }
+      }
+    }
+    
+  }
+  
+  
+  temp= as.data.frame(ls)
+  names(temp)= c("p","d","q","P","D","Q","AIC","BIC","AICc")
+  
+  temp
+  
+}
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+output=SARIMA.c(p1=0,p2=4,q1=0,q2=1,P1=0,P2=1,Q1=0,Q2=2,data=residuals(fit.reg))
+knitr::kable(output)
+```
+
+Then do the model selection based on the minimum AIC, BIC, and AICc.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+# AIC
+df1=output[which.min(output$AIC),]
+Method="Minimum AIC:"
+df1=cbind(df1, Method)
+df1=df1[,c("Method",names(df1)[names(df1) != "Method"])]
+
+# BIC
+df2=output[which.min(output$BIC),]
+Method="Minimum BIC:"
+df2=cbind(df2, Method)
+df2=df2[,c("Method",names(df2)[names(df2) != "Method"])]
+
+# AICc
+df3=output[which.min(output$AICc),]
+Method="Minimum AICc:"
+df3=cbind(df3, Method)
+df3=df3[,c("Method",names(df3)[names(df3) != "Method"])]
+
+#put all data frames into list
+df_list <- list(df1, df2, df3)      
+
+#merge all data frames together
+df_use=Reduce(function(x, y) merge(x, y, all=TRUE), df_list)  
+knitr::kable(df_use)
+```
+
+By checking the AIC and BIC and AICc, the best model is p=4,d=1,q=1, P=0, D=1, Q=0.
+
+### Model Diagnostics
+
+::: {.panel-tabset}
+## ARIMA selected model
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+model_output <- capture.output(sarima(residuals(fit.reg),4,1,2))
+cat(model_output[67:102], model_output[length(model_output)], sep = "\n")
+```
+
+
+## SARIMA selected model
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+model_output <- capture.output(sarima(residuals(fit.reg),4,1,1,0,1,0,12))
+cat(model_output[35:66], model_output[length(model_output)], sep = "\n")
+```
+
+:::
+
+For ARIMA model, by model diagnostics, it can see that the coefficients are significant. The lags of the ACF plots are almost with in the significant range. The ACF plot has few insignificant lags because of the strong seasonality. The general performance of The Sarima model looks better, since it consider more about the seasonality compare to the Arima model. For Sarima model, by model diagnostics, we can see that the coefficients are significant. The lags of the ACF plots are almost with in the significant range. Therefore, the model is in a good fit.
+
+
+
+### Fit the final model
+
+::: {.panel-tabset}
+## ARIMA model
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+xreg <- cbind(Dr = temp.all.ca[, "DroughtIndex"],
+              Pr = temp.all.ca[, "Precipitation"])
+
+fit1 <- Arima(temp.all.ca[,"AverageTemperature"],order=c(4,1,2),xreg=xreg)
+summary(fit1)
+```
+
+## SARIMA model
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+xreg <- cbind(Dr = temp.all.ca[, "DroughtIndex"],
+              Pr = temp.all.ca[, "Precipitation"])
+
+fit2 <- Arima(temp.all.ca[,"AverageTemperature"],order=c(4,1,1),seasonal = c(0,1,0),xreg=xreg)
+summary(fit2)
+```
+
+## Using auto.arima()
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+xreg <- cbind(Dr = temp.all.ca[, "DroughtIndex"],
+              Pr = temp.all.ca[, "Precipitation"])
+fit_auto=auto.arima(temp.all.ca[,"AverageTemperature"], xreg = xreg)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+summary(fit_auto)
+```
+
+:::
+
+The result of using auto.arima has the lowest RMSE. Using sarima model to fit the model has lower RMSE than using arima model. Above all, the model of using auto arima is the most fitted model. In addition, this model also considered the seasonality.
+
+### Forecasting
+
+First, get the vectors of the forecast of the precipitation and the drought index, and use the mean value of those two vectors to do the forecast of the temperature.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+dr_fit<-auto.arima(temp.all.ca[, "DroughtIndex"])
+fdr<-forecast(dr_fit)
+pr_fit<-auto.arima(temp.all.ca[, "Precipitation"])
+fpr<-forecast(pr_fit)
+
+fxreg <- cbind(dr = fdr$mean,
+               pr = fpr$mean)
+```
+
+#### Arima model
+
+Use the model that I obtained manually by using arima model with p=4,d=1,q=2 to do the forecast.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+fcast1 <- forecast(fit1, xreg=fxreg) #fimp$mean gives the forecasted values
+autoplot(fcast1) + xlab("Year") +
+  ylab("Average temperature")
+```
+
+The figure above shows the forecast of the average temperature in the future using the precipitation and the drought index. We can see that the forecast is pretty clear and it follows the seasonal pattern.
+
+#### Sarima model
+
+use p=4,d=1,q=1, P=0, D=1, Q=0 to do the forecast.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+fcast2 <- forecast(fit2, xreg=fxreg) #fimp$mean gives the forecasted values
+autoplot(fcast2) + xlab("Year") +
+  ylab("Average temperature")
+```
+
+The figure above shows the forecast of the average temperature in the future using the precipitation and the drought index using the sarima model. We can see that the margin of error is less than using the arima model, which means predict the trend using sarima model has more confidence.
+
+### Compare with benchmark methods
+
+Plot the forecasts
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+autoplot(temp.all.ca[,"AverageTemperature"]) +
+  autolayer(meanf(temp.all.ca[,"AverageTemperature"], h=30),
+            series="Mean", PI=FALSE) +
+  autolayer(naive(temp.all.ca[,"AverageTemperature"], h=30),
+            series="Naïve", PI=FALSE) +
+  autolayer(snaive(temp.all.ca[,"AverageTemperature"], h=30),
+            series="SNaïve", PI=FALSE)+
+  autolayer(rwf(temp.all.ca[,"AverageTemperature"], h=30, drift=TRUE),
+            series="Drift", PI=FALSE)+
+  autolayer(fcast1, h=30,
+            series="arima",PI=FALSE) +
+  autolayer(fcast2, h=30,
+            series="sarima",PI=FALSE) +
+  guides(colour=guide_legend(title="Forecast"))
+```
+
+By checking the graph, my fitted models and the snaive benchmark method seem have a good fit to predict the time series. Therefore, check the accuracy of forecasting by using those methods.
+
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+f2 <- snaive(temp.all.ca[,"AverageTemperature"], h=30) 
+B1=accuracy(f2)
+B1=as.data.frame(B1)
+Model="Snaive Benchmark Method"
+B1=cbind(B1, Model)
+B1=B1[,c("Model",names(B1)[names(B1) != "Model"])]
+
+B2=accuracy(fcast1)
+B2=as.data.frame(B2)
+Model="Fitted Arima Model"
+B2=cbind(B2, Model)
+B2=B2[,c("Model",names(B2)[names(B2) != "Model"])]
+
+B3=accuracy(fcast2)
+B3=as.data.frame(B3)
+Model="Fitted Sarima Model"
+B3=cbind(B3, Model)
+B3=B3[,c("Model",names(B3)[names(B3) != "Model"])]
+
+#put all data frames into list
+df_list <- list(B1, B2, B3)      
+
+#merge all data frames together
+df_use=Reduce(function(x, y) merge(x, y, all=TRUE), df_list)  
+knitr::kable(df_use)
+```
+
+By comparing the RMSE, the fitted model by using the sarima has the lowest RMSE. The RMSE of my fitted ARIMA model is slightly lower than using the benchmark method. Above all, the fitted model by using sarima has the best performance on predicting the average temperature based on the drought index and the precipitation. 
+
+
+## Flood 
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+flood=read.csv("./data/flood.csv")
+head(flood)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+flood.ts.fl <- flood %>%
+  filter(StateAbbreviation == "FL") %>%
+  select(NumberOfFloods) %>%
+  ts(
+    start = c(2006, 1),
+    frequency = 12,
+    end=c(2020,12)
+  )
+```
+
+The ARIMA and SARIMA model will be applied to better analyze the number of flood in Florida and forecast the future number of flood based on the historical data. Before applying the model, we need to make sure that the time series is stationary. According to the EDA part, the time series is non-stationary, therefore we need to difference to make it stationary.
+
+### Check for stationary (by ACF plot)
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+ggAcf(flood.ts.fl)+ggtitle("ACF for flood in FL")
+```
+
+From the ACF plot,there are some lags out of the significant range. Therefore the data may not be stationary. Therefore, we will try to difference the time series data. 
+
+
+### Difference data 
+
+First, check the ACF plot for original data and multiple order of differencing.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+plot1<-ggAcf(flood.ts.fl)+ggtitle("ACF for flood in FL")
+plot2<-ggAcf(diff(flood.ts.fl, differences = 1))+ggtitle("first difference") 
+grid.arrange(plot1, plot2,nrow=2)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+tseries::adf.test(flood.ts.fl %>% diff())
+```
+
+By checking the ACF plot and ADF test, the time series of the first difference is stationary. However, the ACF of the original data looks already stationary, and may be we do not need to difference the data (over difference). Therefore we are going to consider the situation where d=0,1 in the model selection later.
+
+### ARIMA model
+
+Firstly, obtain q and p according to the ACF and PACF plot
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+flood.ts.fl %>% diff()%>% ggtsdisplay()
+```
+
+The ACF plot suggests that q=1,2 and PACF plot suggests that p=1,2,3,4. Then apply the Arima model and check for the AIC, BIC and AICC.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+d=1
+i=1
+temp= data.frame()
+ls=matrix(rep(NA,6*16),nrow=16) 
+
+
+for (p in 2:5)# p=1,2,3,4
+{
+  for(q in 2:3)# q=1,2
+  {
+    for(d in 0:1)# d=0,1
+    {
+      
+      if(p-1+d+q-1<=9)
+      {
+        
+        model<- Arima(flood.ts.fl,order=c(p-1,d,q-1),include.drift=TRUE) 
+        ls[i,]= c(p-1,d,q-1,model$aic,model$bic,model$aicc)
+        i=i+1
+        #print(i)
+        
+      }
+      
+    }
+  }
+}
+
+temp= as.data.frame(ls)
+names(temp)= c("p","d","q","AIC","BIC","AICc")
+
+#temp
+knitr::kable(temp)
+```
+
+Then do the model selection based on the minimum AIC, BIC, and AICc.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+# AIC
+df1=temp[which.min(temp$AIC),]
+Method="Minimum AIC:"
+df1=cbind(df1, Method)
+df1=df1[,c("Method",names(df1)[names(df1) != "Method"])]
+
+# BIC
+df2=temp[which.min(temp$BIC),]
+Method="Minimum BIC:"
+df2=cbind(df2, Method)
+df2=df2[,c("Method",names(df2)[names(df2) != "Method"])]
+
+# AICc
+df3=temp[which.min(temp$AICc),]
+Method="Minimum AICc:"
+df3=cbind(df3, Method)
+df3=df3[,c("Method",names(df3)[names(df3) != "Method"])]
+
+#put all data frames into list
+df_list <- list(df1, df2, df3)      
+
+#merge all data frames together
+df_use=Reduce(function(x, y) merge(x, y, all=TRUE), df_list)  
+knitr::kable(df_use)
+```
+
+By checking the AIC and BIC and AICc, the best model is p=1,d=1,q=1.
+
+### SARIMA model
+
+By checking the ACF plot, there is no seasonality. Therefore the sarima model will bot be applied to this data.
+
+### Model Diagnostics
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+model_output <- capture.output(sarima(flood.ts.fl,1,1,1))
+cat(model_output[117:148], model_output[length(model_output)], sep = "\n")
+```
+By model diagnostics, we can see that the ACF plot states that the series is stationary now.
+
+Then check for the result of the auto arima model.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+auto.arima(flood.ts.fl)
+```
+
+The result of using auto.arima is different from the model we get by using the arima. This is due to the model is not stationary, when we work with stationary model, it will be better. And we can see that the AIC of using the auto.arima is very big, therefore, we will not use this model.
+
+### Forecasting
+
+Use the most fitted arima model with p=1,d=1,q=1 to do the forecast.
+
+::: {.panel-tabset}
+## Graph 1
+```{r,echo=FALSE, message=FALSE, warning=FALSE,results='hide'}
+sarima.for(flood.ts.fl,20, 1,1,1)
+```
+
+## Graph 2
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+flood.ts.fl %>%
+  Arima(order=c(1,1,1),include.drift = TRUE) %>%
+  forecast() %>%
+  autoplot() +
+  ylab("Number of flood") + xlab("Year")
+```
+
+:::
+
+The two figures above show the forecast of the number of floods in the future. From the graph, we can see that it is difficult to measure the variance of the data, so both plots give a considerable margin of error. 
+
+### Compare with benchmark methods
+
+Plot the forecasts
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+fit <- Arima(flood.ts.fl, order=c(3,1,2),include.drift=TRUE)
+
+autoplot(flood.ts.fl) +
+  autolayer(meanf(flood.ts.fl, h=30),
+            series="Mean", PI=FALSE) +
+  autolayer(naive(flood.ts.fl, h=30),
+            series="Naïve", PI=FALSE) +
+  autolayer(snaive(flood.ts.fl, h=30),
+            series="SNaïve", PI=FALSE)+
+  autolayer(rwf(flood.ts.fl, h=30, drift=TRUE),
+            series="Drift", PI=FALSE)+
+  autolayer(forecast(fit,30), 
+            series="fit",PI=FALSE) +
+  guides(colour=guide_legend(title="Forecast"))
+```
+
+By checking the graph, my fitted model and the snaive benchmark method seem have a good fit to predict the time series. Therefore, check the accuracy of forecasting by using both methods.
+
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+f2 <- snaive(flood.ts.fl, h=30) 
+B1=accuracy(f2)
+B1=as.data.frame(B1)
+Model="Snaive Benchmark Method"
+B1=cbind(B1, Model)
+B1=B1[,c("Model",names(B1)[names(B1) != "Model"])]
+
+B2=accuracy(forecast(fit,30))
+B2=as.data.frame(B2)
+Model="Fitted Arima Model"
+B2=cbind(B2, Model)
+B2=B2[,c("Model",names(B2)[names(B2) != "Model"])]
+
+#put all data frames into list
+df_list <- list(B1, B2)      
+
+#merge all data frames together
+df_use=Reduce(function(x, y) merge(x, y, all=TRUE), df_list)  
+knitr::kable(df_use)
+```
+
+By comparing the RMSE and the MAE, my model is lower than the benchmark method. Therefore my fitted model is slightly better in predict the number of floods than Benchmark method. However, the RMSE is pretty high for both methds. In conclusion, the number of floods cannot predict accurately. 
+
+
+## Drought
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+drought.ts.ny <- weather %>%
+  filter(StateAbbreviation == "CA") %>%
+  select(DroughtIndex) %>%
+  ts(
+    start = c(1895, 1),
+    end = c(2021, 12),
+    frequency = 12
+  )%>%
+  window(start=c(1980,1))
+```
+
+The ARIMA and SARIMA model will be applied to better analyze the drought index in New York and forecast the future drought index based on the historical data. Before applying the model, we need to make sure that the time series is stationary. According to the EDA part, the time series is non-stationary, therefore we need to difference to make it stationary.
+
+### Check for stationary (by ACF plot)
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+ggAcf(drought.ts.ny)+ggtitle("ACF for drought in NY")
+```
+
+From the ACF plot, we can see that there are lots of lags out of the significant range. Therefore the data is not stationary. We need to difference the time series data later. 
+
+### Difference data 
+
+The figures below are the ACF plot for original data and multiple order of differencing.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+plot1<-ggAcf(drought.ts.ny)+ggtitle("ACF for drought in NY")
+plot2<-ggAcf(diff(drought.ts.ny, differences = 1))+ggtitle("first difference") 
+plot3<-ggAcf(diff(drought.ts.ny, differences = 2))+ggtitle("second difference") 
+grid.arrange(plot1, plot2,plot3,nrow=2)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+tseries::adf.test(drought.ts.ny %>% diff())
+```
+
+By checking the ACF plot and ADF test, the first difference makes the time series becomes stationary. The second difference looks better, but it might be over differenced. Therefore we are going to consider the situation where d=1,2 in the model selection later.
+
+### ARIMA model
+
+Firstly, obtain q and p according to the ACF and PACF plot
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+drought.ts.ny %>% diff() %>% ggtsdisplay()
+```
+
+There is no significant p,q that can be choose from the ACF and PACF graph, therefore we will use p,q=1,2,3.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+d=1
+i=1
+temp= data.frame()
+ls=matrix(rep(NA,6*18),nrow=18) # roughly nrow = 3x4x2
+
+
+for (p in 2:4)# p=1,2,3 
+{
+  for(q in 2:4)# q=1,2,3
+  {
+    for(d in 1:2)# d=1,2
+    {
+      
+      if(p-1+d+q-1<=8)
+      {
+        
+        model<- Arima(drought.ts.ny,order=c(p-1,d,q-1),include.drift=TRUE) 
+        ls[i,]= c(p-1,d,q-1,model$aic,model$bic,model$aicc)
+        i=i+1
+        #print(i)
+        
+      }
+      
+    }
+  }
+}
+
+temp= as.data.frame(ls)
+names(temp)= c("p","d","q","AIC","BIC","AICc")
+
+#temp
+knitr::kable(temp)
+```
+
+Then do the model selection based on the minimum AIC, BIC, and AICc.
+
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+# AIC
+df1=temp[which.min(temp$AIC),]
+Method="Minimum AIC:"
+df1=cbind(df1, Method)
+df1=df1[,c("Method",names(df1)[names(df1) != "Method"])]
+
+# BIC
+df2=temp[which.min(temp$BIC),]
+Method="Minimum BIC:"
+df2=cbind(df2, Method)
+df2=df2[,c("Method",names(df2)[names(df2) != "Method"])]
+
+# AICc
+df3=temp[which.min(temp$AICc),]
+Method="Minimum AICc:"
+df3=cbind(df3, Method)
+df3=df3[,c("Method",names(df3)[names(df3) != "Method"])]
+
+#put all data frames into list
+df_list <- list(df1, df2, df3)      
+
+#merge all data frames together
+df_use=Reduce(function(x, y) merge(x, y, all=TRUE), df_list)  
+knitr::kable(df_use)
+```
+
+The minimum of AIC and AICC suggests that p=2,d=1,q=2, and minimum BIC suggests that p=1,d=2,q=1 is better. We will do the model diagnostics and check the performance later to find the better model among those two.
+
+### SARIMA model
+
+By checking the ACF plot, there is no seasonality. Therefore the sarima model will bot be applied to this data.
+
+### Model Diagnostics
+
+::: {.panel-tabset}
+
+## ARIMA(2,1,2)
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+model_output <- capture.output(sarima(drought.ts.ny,2,1,2))
+cat(model_output[151:183], model_output[length(model_output)], sep = "\n")
+```
+
+## ARIMA(1,2,1)
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+model_output <- capture.output(sarima(drought.ts.ny,1,2,1))
+cat(model_output[28:56], model_output[length(model_output)], sep = "\n")
+```
+
+:::
+
+By model diagnostics, by comparing those two models, the model with p=2,d=1,q=2 looks better. The ACF plot shows both model is in a good fit, but the model with p=2,d=1,q=2 has lower p value.
+
+Then check for the result of the auto arima model.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+auto.arima(drought.ts.ny)
+```
+
+The auto arima does not fit the model pretty well. Therefore will not take to consider.
+
+### Forecasting
+
+Use the most fitted arima model with p=2,d=1,q=2 to do the forecast.
+
+::: {.panel-tabset}
+
+## Graph 1
+```{r,echo=FALSE, message=FALSE, warning=FALSE,results='hide'}
+sarima.for(drought.ts.ny,20, 2,1,2)
+```
+
+## Graph 2
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+drought.ts.ny %>%
+  Arima(order=c(2,1,2),include.drift = TRUE) %>%
+  forecast() %>%
+  autoplot() +
+  ylab("drought index") + xlab("Year")
+```
+
+:::
+
+The two figures above show the forecast of the drought index in the future. From the graph, we can see that it is difficult to measure the variance of the data, so both plots give a considerable margin of error.
+
+### Compare with benchmark methods
+
+Plot the forecasts
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+fit <- Arima(drought.ts.ny, order=c(2,1,2),include.drift=TRUE)
+
+autoplot(drought.ts.ny) +
+  autolayer(meanf(drought.ts.ny, h=30),
+            series="Mean", PI=FALSE) +
+  autolayer(naive(drought.ts.ny, h=30),
+            series="Naïve", PI=FALSE) +
+  autolayer(snaive(drought.ts.ny, h=30),
+            series="SNaïve", PI=FALSE)+
+  autolayer(rwf(drought.ts.ny, h=30, drift=TRUE),
+            series="Drift", PI=FALSE)+
+  autolayer(forecast(fit,30), 
+            series="fit",PI=FALSE) +
+  guides(colour=guide_legend(title="Forecast"))
+```
+
+By checking the graph, my fitted model and the snaive benchmark method seem have a good fit to predict the time series. Therefore, check the accuracy of forecasting by using both methods.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+f2 <- snaive(drought.ts.ny, h=30)
+B1=accuracy(f2)
+B1=as.data.frame(B1)
+Model="Snaive Benchmark Method"
+B1=cbind(B1, Model)
+B1=B1[,c("Model",names(B1)[names(B1) != "Model"])]
+
+B2=accuracy(forecast(fit,30))
+B2=as.data.frame(B2)
+Model="Fitted Arima Model"
+B2=cbind(B2, Model)
+B2=B2[,c("Model",names(B2)[names(B2) != "Model"])]
+
+#put all data frames into list
+df_list <- list(B1, B2)      
+
+#merge all data frames together
+df_use=Reduce(function(x, y) merge(x, y, all=TRUE), df_list)  
+knitr::kable(df_use)
+```
+
+By comparing the RMSE and the MAE, my fitted model is lower than the benchmark method. Therefore my fitted model can predict the drought index better. 
+
+
+

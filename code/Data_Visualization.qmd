@@ -1,0 +1,235 @@
+---
+title: "Data Visualization"
+format: html
+editor: visual
+---
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(plotly)
+library(tseries)
+library(dplyr)
+```
+
+
+This section will present some basic visualizations of the datasets that will be further explored and analyzed in subsequent sections.
+
+## Visualize the Temperature Data
+
+This dataset is downloaded from the National Oceanic and Atmospheric Administration. The data set contains the information about temperature from 1895 to 2021 for all the state in the US. Firstly, visualize the average temperature in all the state in the US. The figure is created by using tableau.
+
+![](./graph/visual1)
+
+[The link to the graph in tableau public](https://public.tableau.com/app/profile/zifeng1079/viz/560_project_visual1/Sheet1)
+
+Then view temperature information for the selected states, which will be analyzed in subsequent sections, including California, Florida, and New York. 
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+weather=read.csv("./data/weather.csv")
+head(weather)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+NY=weather[weather$StateAbbreviation=="NY",]
+FL=weather[weather$StateAbbreviation=="FL",]
+CA=weather[weather$StateAbbreviation=="CA",]
+CAFLNY=weather[weather$StateAbbreviation %in% c("CA","FL","NY"),]
+head(CA)
+```
+
+
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+CA$date=as.Date(CA$Date,format="%Y-%m-%d")
+FL$date=as.Date(FL$Date,format="%Y-%m-%d")
+NY$date=as.Date(NY$Date,format="%Y-%m-%d")
+CAFLNY$date=as.Date(CAFLNY$Date,format="%Y-%m-%d")
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+start_date=as.Date("1990-01-01")
+CA90=filter(CA, date >= start_date)
+FL90=filter(FL, date >= start_date)
+NY90=filter(NY, date >= start_date)
+CAFLNY90=filter(CAFLNY, date >= start_date)
+```
+
+::: {.panel-tabset}
+
+## Average Temperature
+
+```{r,echo=FALSE}
+fig1=plot_ly(CAFLNY90,x=~date, y=~AverageTemperature, color= ~StateAbbreviation,type = 'scatter', mode = 'lines')
+fig1%>%
+  layout(title=list(text="Average Temperature in selected States",fontsize=15),
+         xaxis=list(title="Date"),
+         yaxis=list(title="Average temp"))
+
+```
+
+## Maximum Temperature
+
+```{r,echo=FALSE}
+fig1=plot_ly(CAFLNY90,x=~date, y=~MaxTemperature, color= ~StateAbbreviation,type = 'scatter', mode = 'lines')
+fig1%>%
+  layout(title=list(text="Maximum Temperature in Selected States",fontsize=15),
+         xaxis=list(title="Date"),
+         yaxis=list(title="Max temp"))
+```
+
+## Minimum Temperature
+
+```{r,echo=FALSE}
+fig1=plot_ly(CAFLNY90,x=~date, y=~MinTemperature, color= ~StateAbbreviation,type = 'scatter', mode = 'lines')
+fig1%>%
+  layout(title=list(text="Minimum Temperature in Selected States",fontsize=15),
+         xaxis=list(title="Date"),
+         yaxis=list(title="min temp"))
+```
+
+:::
+
+<br>
+The three figures above are the trend of the average temperature, maximum temperature, and the minimum temperature over time. The figures clearly show the seasonality of the temperature in each state. We can see that the minimum temperature in New York in Feb 2015 is extremely lower than the other year. This is due to the extremely strong winter storm "JUNO" arrived in the northeastern United States. 
+
+The figure also shows that the average of the Florida is the highest among those three states, and the New York is the lowest. The Maximum temperature in California is very close to that of Florida, but the minimum temperature in California is quite lower than Florida. That means the temperature difference in Florida is relatively small compare to the California
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE ,results='hide'}
+colnames(CA)
+```
+
+## Visualize the Drought information
+
+This part will visualize the drought index and the precipitation in the selected states overtime, and then examine the relationship between the drought index and the precipitation.
+
+
+::: {.panel-tabset}
+
+## Drought 1
+```{r,echo=FALSE}
+fig1=plot_ly(CAFLNY90,x=~date, y=~DroughtIndex, color= ~StateAbbreviation,type = 'scatter', mode = 'lines')
+fig1%>%
+  layout(title=list(text="Drought Index in Selected States",fontsize=15),
+         xaxis=list(title="Date"),
+         yaxis=list(title="Drought idx"))
+```
+
+## Drought 2
+
+```{r,echo=FALSE}
+fig1=plot_ly(NY90,x=~date, y=~DroughtIndex,type = 'scatter', mode = 'lines',name = "NY")%>%
+  layout(yaxis=list(title="Drought idx"))
+fig2=plot_ly(CA90,x=~date, y=~DroughtIndex,type = 'scatter', mode = 'lines',name = "CA")%>%
+  layout(yaxis=list(title="Drought idx"))
+fig3=plot_ly(FL90,x=~date, y=~DroughtIndex,type = 'scatter', mode = 'lines',name = "FL")%>%
+  layout(yaxis=list(title="Drought idx"))
+fig <- subplot(fig1, fig2, fig3, nrows = 3, shareX = T, shareY = T, titleX = T, titleY = T) %>% 
+  layout(title=list(text="Drought Index in Selected States",fontsize=15),
+         xaxis=list(title="Date"),
+         yaxis=list(title="Drought idx"))
+fig
+```
+
+## Precipitation
+
+```{r,echo=FALSE}
+fig1=plot_ly(NY90,x=~date, y=~Precipitation,type = 'scatter', mode = 'lines',name = "NY")
+fig2=plot_ly(CA90,x=~date, y=~Precipitation,type = 'scatter', mode = 'lines',name = "CA")
+fig3=plot_ly(FL90,x=~date, y=~Precipitation,type = 'scatter', mode = 'lines',name = "FL")
+fig <- subplot(fig1, fig2, fig3, nrows = 3, shareX = TRUE, shareY = TRUE) %>% 
+  layout(title=list(text="Precipitation in Selected States",fontsize=15),
+         xaxis=list(title="Date"),
+         yaxis=list(title="Precipitation"))
+fig
+```
+
+## Drougnt vs Precipitation
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+fig1=plot_ly(NY90,x=~Precipitation, y=~DroughtIndex,type = 'scatter',name = "NY")%>%
+  layout(xaxis=list(title="Precipitation"),
+         yaxis=list(title="Drought idx"))
+fig2=plot_ly(CA90,x=~Precipitation, y=~DroughtIndex,type = 'scatter',name = "CA")%>%
+  layout(xaxis=list(title="Precipitation"),
+         yaxis=list(title="Drought idx"))
+fig3=plot_ly(FL90,x=~Precipitation, y=~DroughtIndex,type = 'scatter',name = "FL")%>%
+  layout(xaxis=list(title="Precipitation"),
+         yaxis=list(title="Drought idx"))
+fig <- subplot(fig1, fig2, fig3, nrows = 3, shareX = TRUE, shareY = TRUE) %>% 
+  layout(title=list(text="Drought Index vs Precipitation in Selected States",fontsize=15))
+fig
+```
+
+:::
+
+From the graphs, we can see the weakly correlation between the drought index and the precipitation. When the Precipitation is low, most of the point is also allocated in the low drought index area. They are not highly correlated might due to if we want to overcome the drought, we need sustainable rainfall.
+
+## Visualize the Flood data
+
+This part will visualize the number of floods in the selected states over time. Then select a specific year to check for the information about the month data of the number of floods.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+flood=read.csv("./data/flood.csv")
+head(flood)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+fNY=flood[flood$StateAbbreviation=="NY",]
+fFL=flood[flood$StateAbbreviation=="FL",]
+fCA=flood[flood$StateAbbreviation=="CA",]
+fCAFLNY=flood[flood$StateAbbreviation %in% c("CA","FL","NY"),]
+head(fCA)
+```
+
+
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+fCA$date=as.Date(fCA$Date,format="%Y-%m-%d")
+fFL$date=as.Date(fFL$Date,format="%Y-%m-%d")
+fNY$date=as.Date(fNY$Date,format="%Y-%m-%d")
+fCAFLNY$date=as.Date(fCAFLNY$Date,format="%Y-%m-%d")
+```
+
+::: {.panel-tabset}
+
+## Floods Overtime
+```{r,echo=FALSE}
+fig1=plot_ly(fNY,x=~date, y=~NumberOfFloods,type = 'scatter', mode = 'lines+markers',name = "NY")
+fig2=plot_ly(fCA,x=~date, y=~NumberOfFloods,type = 'scatter', mode = 'lines+markers',name = "CA")
+fig3=plot_ly(fFL,x=~date, y=~NumberOfFloods,type = 'scatter', mode = 'lines+markers',name = "FL")
+fig <- subplot(fig1, fig2, fig3, nrows = 3, shareX = TRUE, shareY = TRUE) %>% 
+  layout(title=list(text="Number of Floods in Selected States",fontsize=15),
+         xaxis=list(title="Date"),
+         yaxis=list(title="Number of Floods"))
+fig
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE,results='hide'}
+Sys.setlocale("LC_ALL", "English")
+```
+
+## Floods in 2020
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+
+g1=ggplot(data=fCAFLNY[fCAFLNY$date>=as.Date("2020-01-01")&fCAFLNY$date<=as.Date("2020-12-01"),],aes(x=date,y=NumberOfFloods))+
+  geom_col(aes(fill=StateAbbreviation))+facet_grid(StateAbbreviation~.)+
+  guides(fill=guide_legend(title="State"))+
+  theme(legend.position="none")+
+  labs(title="Number of Floods in 2020 in Selected states",
+       x="Date",
+       y="Number of Floods")
+
+ggplotly(g1)
+
+#theme(legend.background = element_rect( size=.5),
+        #legend.title = element_text(size=13, face="bold"),
+        #legend.position="top")
+```
+
+:::
+
+The figure clearly shows that in Florida, there are two high point about the flood in 2014 and 2020. The number of floods is relatively low in Florida. There are three high number of flood in California in Feb 2014, Feb 2017, and Feb 2019, and the flood is higher than the previous every time. But after 2019, the number of floods become lower. Also, the months with higher number of floods are different in different states
+
+

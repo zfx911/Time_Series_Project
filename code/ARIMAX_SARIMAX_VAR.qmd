@@ -1,0 +1,512 @@
+---
+title: "ARIMAX/SARIMAX/VAR"
+format: html
+editor: visual
+
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(plotly)
+library(tseries)
+library(dplyr)
+library(lubridate)
+library(tseries)
+library(TSstudio)
+library(forecast) # package for autoplot
+library(gridExtra)
+library(astsa)
+
+```
+
+
+## ARIMAX models
+
+### Temperature Change Caused by the Emission of Green House Gases.
+In this part, the response variable is the temperature change, and exogenous variables(predictor variables) are the green house gases.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+temp_em=read.csv("./data/climate_change.csv")
+head(temp_em)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+temp_em=temp_em[-(1:8), , drop = FALSE]
+head(temp_em)
+tail(temp_em)
+```
+
+The scatter plot will be used to test whether there exists relationship between temperature and those green house gases.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+#par(mfrow=c(2,3))
+p1=temp_em %>% ggplot(aes(x=CO2,y=Temp))+geom_point()+labs(title="Temp vs CO2")
+p2=temp_em %>% ggplot(aes(x=CH4,y=Temp))+geom_point()+labs(title="Temp vs CH4")
+p3=temp_em %>% ggplot(aes(x=N2O,y=Temp))+geom_point()+labs(title="Temp vs N2O")
+p4=temp_em %>% ggplot(aes(x=CFC.11,y=Temp))+geom_point()+labs(title="Temp vs CFC.11")
+p5=temp_em %>% ggplot(aes(x=CFC.12,y=Temp))+geom_point()+labs(title="Temp vs CFC.12")
+grid.arrange(p1,p2,p3,p4,p5,ncol=2)
+```
+
+
+### Using auto.arima()
+Firstly, we will use auto.arima() to fit the model.
+
+```{r, message=FALSE, warning=FALSE}
+xreg <- cbind(CO2 = temp_em[, "CO2"],
+              CH4 = temp_em[, "CH4"],
+              N2O = temp_em[, "N2O"],
+              CFC.11 = temp_em[, "CFC.11"],
+              CFC.12 = temp_em[, "CFC.12"])
+fit_auto=auto.arima(temp_em[,"Temp"], xreg = xreg)
+
+summary(fit_auto)
+```
+
+<br>
+
+### Fit manually by using arima model
+
+In this part, fit the regression model at first, and then use the residuals of the regression model to fit the ARIMA model.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+fit.reg <- lm(Temp ~ CO2+CH4+N2O+CFC.11+CFC.12, data=temp_em)
+res.fit<-ts(residuals(fit.reg),star=decimal_date(as.Date("1984-01-01",format = "%Y-%m-%d")),frequency = 12)
+```
+
+Firstly, check the ACF plot with multiple difference, and then confirmed by ADF test.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+plot1=ggAcf(residuals(fit.reg))
+plot2<-ggAcf(diff(residuals(fit.reg), differences = 1))+ggtitle("first difference") 
+plot3<-ggAcf(diff(residuals(fit.reg), differences = 2))+ggtitle("second difference") 
+
+grid.arrange(plot1, plot2,plot3,nrow=2)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+tseries::adf.test(residuals(fit.reg) %>% diff() )
+```
+
+By checking the ACF plot, it seems like the first difference is almost stationary, and the second difference may be over difference. The ADF test wil the difference comfirm that the first difference is stationary. Therefore we will consider the cases that d=0,1 in ARIMA model later
+
+Then obtain q and p according to the ACF and PACF plot of the first difference.
+
+```{r,include=FALSE}
+residuals(fit.reg) %>% diff() %>% diff()  %>% ggtsdisplay()
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+res.fit %>% diff()  %>% ggtsdisplay()
+```
+
+The ACF plot suggests that q=1. Since the case that lag 3 is just within the prediction interval, we will also consider the case that q=3. PACF plot suggests that p=1,3,4. Then apply the Arima model and check for the AIC, BIC and AICC.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+d=1
+i=1
+temp= data.frame()
+ls=matrix(rep(NA,6*24),nrow=24) 
+
+
+for (p in 2:5)# p=1,2,3,4
+{
+  for(q in 2:4)# q=1,2,3
+  {
+    for(d in 0:1)# d=0,1
+    {
+      
+      if(p-1+d+q-1<=8)
+      {
+        
+        model<- Arima(res.fit,order=c(p-1,d,q-1),include.drift=TRUE) 
+        ls[i,]= c(p-1,d,q-1,model$aic,model$bic,model$aicc)
+        i=i+1
+        #print(i)
+        
+      }
+      
+    }
+  }
+}
+
+temp= as.data.frame(ls)
+names(temp)= c("p","d","q","AIC","BIC","AICc")
+
+#temp
+knitr::kable(temp)
+```
+
+Then do the model selection based on the minimum AIC, BIC, and AICc.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+# AIC
+df1=temp[which.min(temp$AIC),]
+Method="Minimum AIC:"
+df1=cbind(df1, Method)
+df1=df1[,c("Method",names(df1)[names(df1) != "Method"])]
+
+# BIC
+df2=temp[which.min(temp$BIC),]
+Method="Minimum BIC:"
+df2=cbind(df2, Method)
+df2=df2[,c("Method",names(df2)[names(df2) != "Method"])]
+
+# AICc
+df3=temp[which.min(temp$AICc),]
+Method="Minimum AICc:"
+df3=cbind(df3, Method)
+df3=df3[,c("Method",names(df3)[names(df3) != "Method"])]
+
+#put all data frames into list
+df_list <- list(df1, df2, df3)      
+
+#merge all data frames together
+df_use=Reduce(function(x, y) merge(x, y, all=TRUE), df_list)  
+knitr::kable(df_use)
+```
+
+The minimum AIC, AICc suggests that the ARIMA(4,0,2) is the model with best fit. The minimum BIC suggests that the ARIMA(1,0,1) is the model with best fit.
+
+
+<br>
+
+### Model Diagnostics
+
+The model diagnostics is used to check the performance of the result of using auto.arima() and the result of using arima() to fit manually.
+
+::: {.panel-tabset}
+## ARIMA(4,0,2)
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+model_output <- capture.output(sarima(res.fit,4,0,2))
+cat(model_output[176:210], model_output[length(model_output)], sep = "\n")
+```
+
+## ARIMA(1,0,1)
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+model_output <- capture.output(sarima(res.fit,1,0,1))
+cat(model_output[39:70], model_output[length(model_output)], sep = "\n")
+```
+
+## auto.arima()
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+model_output <- capture.output(sarima(res.fit,2,0,0))
+cat(model_output[25:54], model_output[length(model_output)], sep = "\n")
+```
+
+:::
+
+We can see that all the models are in a good fit, therefore we should apply the cross validation to find the best model that will be used to do the prediction
+
+
+<br>
+
+### Cross Validation
+In cross validation, we will compare the RMSE of those models. The model with relative lower RMSE is the model with the best fit. The figure below shows the average RMSE in each month of those models. In the graph, fit1 use the model ARIMA(4,0,2), fit2 use the model ARIMA(1,0,1), and fit3 use the model ARIMA(2,0,0)
+
+```{r, message=FALSE, warning=FALSE}
+n=length(res.fit)
+k= 96   # 8*12=96   from 1984(1984-01) to 1992 (1991-12), 1992-1984=8 years
+
+# cv test from 1992-01 to 2008-12, (2008-1992+1=17)
+# 17 years and 12 month in total
+rmse1 <- matrix(NA, 17,12)
+rmse2 <- matrix(NA, 17,12)
+rmse3 <- matrix(NA, 17,12)
+year<-c()
+  
+# step
+st <- tsp(res.fit)[1]+(k-1)/12 
+
+# 17 yeats in total
+for(i in 1:17)
+{
+  #xtrain <- window(a10, start=st+(i-k+1)/12, end=st+i/12)
+  xtrain <- window(res.fit, end=st + i-1)
+  xtest <- window(res.fit, start=st + (i-1) + 1/12, end=st + i)
+  
+  #ARIMA(0,1,1)x(0,1,1)[4] ARIMA(0,1,0)(2,0,0)[4]
+  
+  fit <- Arima(xtrain, order=c(4,0,2),
+                include.drift=TRUE, method="ML")
+  fcast <- forecast(fit, h=12)
+  
+  fit2 <- Arima(xtrain, order=c(1,0,1),
+                include.drift=TRUE, method="ML")
+  fcast2 <- forecast(fit2, h=12)
+  
+  fit3 <- Arima(xtrain, order=c(2,0,0),
+                include.drift=TRUE, method="ML")
+  fcast3 <- forecast(fit3, h=12)
+  
+
+  rmse1[i,1:length(xtest)]  <- sqrt((fcast$mean-xtest)^2)
+  rmse2[i,1:length(xtest)] <- sqrt((fcast2$mean-xtest)^2)
+  rmse3[i,1:length(xtest)] <- sqrt((fcast3$mean-xtest)^2)
+  
+}
+
+plot(1:12, colMeans(rmse1,na.rm=TRUE), type="l", col=2, xlab="horizon", ylab="RMSE")
+lines(1:12, colMeans(rmse2,na.rm=TRUE), type="l",col=3)
+lines(1:12, colMeans(rmse3,na.rm=TRUE), type="l",col=4)
+legend("topleft",legend=c("fit1","fit2","fit3"),col=2:4,lty=1)
+```
+
+By comparing the RMSE of those model, we can see that the fit1 has relatively lower RMSE in most of cases. Therefore ARIMA(4,0,2) is the best model and will be used to do the forecasting.
+
+
+<br>
+
+### Fit the final model
+
+We will use the ARIMA(4,0,2) to fit the final model.
+```{r, message=FALSE, warning=FALSE}
+xreg <- cbind(CO2 = temp_em[, "CO2"],
+              CH4 = temp_em[, "CH4"],
+              N2O = temp_em[, "N2O"],
+              CFC.11 = temp_em[, "CFC.11"],
+              CFC.12 = temp_em[, "CFC.12"])
+fit1=Arima(temp_em[,"Temp"],order=c(4,0,2), xreg = xreg)
+summary(fit1)
+```
+
+<br>
+
+From the summary of the final fitted model. We can get the equation below:
+
+$$Temp_{t}=2.0220+0.0026 CO2_{t}-0.0012CH4_{t}-0.0048N2O_{t}-0.0055CFC.11_{t}+0.0046CFC.12_{t}+ n_{t}$$
+where 
+
+$$n_{t}=0.0724n_{t-1} +0.8731n_{t-2}-0.0957n_{t-3} -0.0401n_{t-4} + \varepsilon_{t} +0.4469 \varepsilon_{t-1} -0.4049 \varepsilon_{t-2}$$
+
+where
+
+$$\varepsilon_{t}=NID(0,0.005786)$$
+
+
+### Forecast
+Before forecasting the temperature, we need to predict the other exogenous variables which are the green house gases using auto.arima() at first. Then use the predictions for the exogenous variables to forecast the future temperature.
+
+```{r, message=FALSE, warning=FALSE}
+#  predict the other exogenous variables
+CO2_fit<-auto.arima(temp_em[, "CO2"])
+fCO2<-forecast(CO2_fit)
+CH4_fit<-auto.arima(temp_em[, "CH4"])
+fCH4<-forecast(CH4_fit)
+N2O_fit<-auto.arima(temp_em[, "N2O"])
+fN2O<-forecast(N2O_fit)
+CFC.11_fit<-auto.arima(temp_em[, "CFC.11"])
+fCFC.11<-forecast(CFC.11_fit)
+CFC.12_fit<-auto.arima(temp_em[, "CFC.12"])
+fCFC.12<-forecast(CFC.12_fit)
+
+fxreg <- cbind(CO2 = fCO2$mean,
+               CH4 = fCH4$mean,
+               N2O = fN2O$mean,
+               CFC.11 = fCFC.11$mean,
+               CFC.12 = fCFC.12$mean)
+
+# predict the model
+fcast1 <- forecast(fit1, xreg=fxreg) 
+autoplot(fcast1) + xlab("Year") +
+  ylab("Temperature")
+```
+
+The figure above shows the forecast of the temperature in the future using the emission of the green house gases. We can see that the forecast has a proper prediction intervals which means has good confidence,and the Temperature index will be increasing a little bit the the future.
+
+
+
+## VAR model
+
+### Interrelationship between Temperature Change, Dought Index, and Precipitaion.
+
+In this part, we will filter the data by only considering the information of the California from 1980 to 2020.
+
+We will check for the time series graph at first.
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+weather=read.csv("./data/weather.csv")
+head(weather)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+temp.all.ca <- weather %>%
+  filter(StateAbbreviation == "CA") %>%
+  select(AverageTemperature,DroughtIndex,Precipitation) %>%
+  ts(
+    start = c(1895, 1),
+    end = c(2020, 12),
+    frequency = 12
+  )%>%
+  window(start=c(1980,1))
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+autoplot(temp.all.ca, facets=TRUE) +
+  xlab("Year") + ylab("") +
+  ggtitle("Average Temp, Drought Index, Precipitation in CA")
+```
+
+### Use VARselect() to find the best p to fit VAR(p)
+```{r,echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+library(vars)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+VARselect(temp.all.ca, lag.max=15, type="both")
+```
+
+It’s clear that according to the selection criteria p= 7 and 12 are good to fit the model.
+
+
+<br>
+
+### Fit the VAR model with selected p.
+
+::: {.panel-tabset}
+## Fit VAR(7)
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+summary(VAR(temp.all.ca, p=7, type='both'))
+```
+
+
+## Fit VAR(12)
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+summary(VAR(temp.all.ca, p=12, type='both'))
+```
+
+:::
+
+### Cross Validation
+
+Here, the Cross validation will be used to select the best model between VAR(7) and VAR(12). The fit1 (RMSE1) is VAR(7), and the fit2 (RMSE2) is VAR(12).
+
+ie.The code for cross validation is fold below
+```{r, message=FALSE, warning=FALSE}
+n=length(temp.all.ca)/3
+k= 144       # 1980-1992 -> 12 years, 12(years)*12(month)
+
+# step
+st <- tsp(temp.all.ca)[1]+(k-1)/12 
+
+# number = 29*12= 348
+rmse1 <- matrix(NA, 348,3)
+rmse2 <- matrix(NA, 348,3)
+year<-c()
+
+# i = test from 1992 - 2020 (28+1=29)
+for(i in 1:29)
+{
+  
+  xtrain <- window(temp.all.ca, end=st + i-1)
+  xtest <- window(temp.all.ca, start=st + (i-1) + 1/12, end=st + i)
+  
+  # fit1=VAR(7)
+  fit <- VAR(temp.all.ca, p=7, type='both')
+  fcast <- predict(fit, n.ahead = 12)
+  
+  ftmp<-fcast$fcst$AverageTemperature
+  fdr<-fcast$fcst$DroughtIndex
+  fpre<-fcast$fcst$Precipitation
+  ff<-data.frame(ftmp[,1],fdr[,1],fpre[,1])
+  
+  year<-st + (i-1) + 1/12
+  
+  ff<-ts(ff,start=c(year,1),frequency = 12)
+  
+  a = 12*i-11
+  b= 12*i
+  rmse1[c(a:b),]  <-sqrt((ff-xtest)^2)
+  
+  
+  # fit2=VAR(12)
+  fit2 <- VAR(temp.all.ca, p=12, type='both')
+  fcast2 <- predict(fit2, n.ahead = 12)
+  
+  ftmp<-fcast2$fcst$AverageTemperature
+  fdr<-fcast2$fcst$DroughtIndex
+  fpre<-fcast2$fcst$Precipitation
+  ff2<-data.frame(ftmp[,1],fdr[,1],fpre[,1])
+  
+  year<-st + (i-1) + 1/12
+  
+  ff2<-ts(ff2,start=c(year,1),frequency = 12)
+  
+  a = 12*i-11
+  b= 12*i
+  rmse2[c(a:b),]  <-sqrt((ff2-xtest)^2)
+}
+
+# Create data frame to record these data.
+yr = rep(c(1992:2020),each =12)
+qr = rep(paste0("M",1:12),29)
+
+rmse1 = data.frame(yr,qr,rmse1)
+names(rmse1) =c("Year", "Month","AvgTemp","DroughtIndex","Precipitation")
+rmse2 = data.frame(yr,qr,rmse2)
+names(rmse2) =c("Year", "Month","AvgTemp","DroughtIndex","Precipitation")
+```
+
+::: {.panel-tabset}
+## Average Temperature
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+
+ggplot() + 
+  geom_line(data = rmse1, aes(x = Year, y = AvgTemp, color= "RMSE1")) +
+  geom_line(data = rmse2, aes(x = Year, y = AvgTemp, color= "RMSE2")) +
+  labs(
+    title = "CV RMSE for AvgTemp",
+    x = "Date",
+    y = "RMSE")+
+  scale_color_manual(name='Fitted model',
+                     values=c('RMSE1'='red', 'RMSE2'='blue'))
+```
+
+## Drought Index
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+ggplot() + 
+  geom_line(data = rmse1, aes(x = Year, y = DroughtIndex, color= "RMSE1")) +
+  geom_line(data = rmse2, aes(x = Year, y = DroughtIndex, color= "RMSE2")) +
+  labs(
+    title = "CV RMSE for DroughtIndex",
+    x = "Date",
+    y = "RMSE")+
+  scale_color_manual(name='Fitted model',
+                     values=c('RMSE1'='red', 'RMSE2'='blue'))
+```
+
+## Precipitation
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+ggplot() + 
+  geom_line(data = rmse1, aes(x = Year, y = Precipitation, color= "RMSE1")) +
+  geom_line(data = rmse2, aes(x = Year, y = Precipitation, color= "RMSE2")) +
+  labs(
+    title = "CV RMSE for Precipitation",
+    x = "Date",
+    y = "RMSE")+
+  scale_color_manual(name='Fitted model',
+                     values=c('RMSE1'='red', 'RMSE2'='blue'))
+
+```
+
+:::
+
+(The shape of the RMSE error looks a little bit weird because in some date, the drought index and Precipitation are both 0, therefore the RMSE will be 0 in those day)
+
+From the graph, the fit2 model has relatively lower RMSE is most cases. Therefore VAR(12) is the better. 
+
+### Forecasting 
+
+Use VAR(12) to do the forecasting.
+```{r, message=FALSE, warning=FALSE}
+var_use=VAR(temp.all.ca, p=12, type='both')
+forecasts <- predict(var_use)
+plot(forecasts)
+```
+
+We can see the forecast of the average temperature, drought index, and the precipitation within 95% prediction intervals in from the above plots. We can see the prediction of the temperature has strong confidence since the prediction intervals is narrow. Also we can see the seasonal fluctuation in the prediction of the average temperature. The prediction interval of drought index is large, therefore we may not have strong confidence to capture the trend of the drought index.
+
+
